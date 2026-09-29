@@ -76,14 +76,6 @@ sector_emissions:  # used by the plot_sector_emissions rule (sector-coupled netw
       "Agriculture/Forestry": "agriculture"
     model_sector_groups: {}
   fuels: ["coal", "oil", "gas"]  # bus carriers to report fuel withdrawals for
-  carrier_sector_map:  # fallback for components without a `sector`: first keyword found in the carrier name -> sector
-    "transport": "transport"
-    "aviation": "transport"
-    "shipping": "transport"
-    "industry": "industry"
-    "residential": "residential"
-    "services": "services"
-    "agriculture": "agriculture"
 
 
 plot_osm_grid_network:

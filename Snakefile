@@ -372,7 +372,6 @@ rule plot_sector_emissions:
             "model_sector_groups", {}
         ),
         fuels=sector_emissions_config.get("fuels", ["coal", "oil", "gas"]),
-        carrier_sector_map=sector_emissions_config.get("carrier_sector_map", {}),
     script:
         "scripts/plot_sector_emissions.py"
 

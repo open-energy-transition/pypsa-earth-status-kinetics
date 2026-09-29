@@ -9,8 +9,7 @@ network, optionally compared against reference emissions (e.g. IEA).
 
 Sectors are read from the ``sector`` column of Loads and Links, which
 ``prepare_sector_network`` sets on sector-coupled networks. Components without
-a sector are assigned by keywords in their carrier name
-(``carrier_sector_map``), and otherwise reported as ``unassigned``.
+a sector are reported as ``unassigned``.
 """
 
 import logging
@@ -35,62 +34,41 @@ REFERENCE_COLOR = "#eb6834"
 FUEL_COLORS = {"coal": "#2a78d6", "oil": "#eb6834", "gas": "#1baf7a"}
 
 
-def get_static(n, c):
-    return n.static(c) if hasattr(n, "static") else n.df(c)
-
-
-def make_sector_grouper(carrier_sector_map=None):
+def statistic_by_sector(n, statistic, **kwargs):
     """
-    Build a statistics grouper returning the ``sector`` column of a component.
-
-    Components with an empty sector fall back to the first keyword in
-    ``carrier_sector_map`` found in their carrier name (e.g. "land transport
-    oil" -> "transport"); anything left is reported as ``unassigned``.
+    Evaluate an ``n.statistics`` method for Loads and Links and sum it per
+    ``sector``. Rows with an empty sector are reported as ``unassigned``, as is
+    everything in networks built before sector tagging (no ``sector`` column).
     """
-    carrier_sector_map = carrier_sector_map or {}
+    method = getattr(n.statistics, statistic)
+    try:
+        result = method(comps=COMPONENTS, groupby="sector", **kwargs)
+    except KeyError:
+        logger.warning(
+            f"Loads or Links have no 'sector' column; reporting all as '{UNASSIGNED}'."
+        )
+        result = method(comps=COMPONENTS, groupby=False, **kwargs)
+        return pd.Series({UNASSIGNED: result.sum()}) if not result.empty else result
 
-    def infer_from_carrier(carrier):
-        for keyword, sector in carrier_sector_map.items():
-            if keyword in carrier:
-                return sector
-        return ""
-
-    def get_sector(n, c, nice_names=True):
-        static = get_static(n, c)
-        if "sector" in static.columns:
-            sector = static["sector"].fillna("")
-        else:
-            sector = pd.Series("", index=static.index)
-
-        missing = sector == ""
-        if missing.any() and "carrier" in static.columns:
-            sector[missing] = static.loc[missing, "carrier"].map(infer_from_carrier)
-
-        return sector.replace("", UNASSIGNED).rename("sector")
-
-    return get_sector
-
-
-def sum_by_sector(statistic):
-    if statistic.empty:
+    if result.empty:
         return pd.Series(dtype=float)
-    return statistic.groupby(level="sector").sum()
+
+    sectors = result.index.get_level_values("sector").fillna("")
+    return result.groupby(sectors.where(sectors != "", UNASSIGNED)).sum()
 
 
-def emissions_by_sector(n, get_sector):
+def emissions_by_sector(n):
     """
     Net CO2 emitted to the atmosphere per sector [MtCO2].
 
     Uses the energy balance at buses with carrier ``co2``: positive values are
     CO2 added to the atmosphere, negative values are CO2 removed.
     """
-    balance = n.statistics.energy_balance(
-        comps=COMPONENTS, bus_carrier="co2", groupby=get_sector
-    )
-    return (sum_by_sector(balance) / 1e6).rename("model")
+    balance = statistic_by_sector(n, "energy_balance", bus_carrier="co2")
+    return (balance / 1e6).rename("model")
 
 
-def fuel_use_by_sector(n, fuels, get_sector):
+def fuel_use_by_sector(n, fuels):
     """
     Fuel withdrawn from the buses of each fuel carrier, per sector [TWh].
     """
@@ -100,10 +78,7 @@ def fuel_use_by_sector(n, fuels, get_sector):
         if fuel not in bus_carriers:
             logger.warning(f"No buses with carrier '{fuel}' in the network; skipping.")
             continue
-        withdrawal = n.statistics.withdrawal(
-            comps=COMPONENTS, bus_carrier=fuel, groupby=get_sector
-        )
-        frames[fuel] = sum_by_sector(withdrawal)
+        frames[fuel] = statistic_by_sector(n, "withdrawal", bus_carrier=fuel)
 
     fuel_use = pd.DataFrame(frames).fillna(0.0) / 1e6
     fuel_use.index.name = "sector"
@@ -231,14 +206,7 @@ if __name__ == "__main__":
     year = int(snakemake.params["reference_year"])
     n = pypsa.Network(snakemake.input["network"])
 
-    if not any("sector" in get_static(n, c).columns for c in COMPONENTS):
-        logger.warning(
-            "Loads and Links have no 'sector' column; all values will be "
-            f"reported as '{UNASSIGNED}'."
-        )
-
-    get_sector = make_sector_grouper(snakemake.params["carrier_sector_map"])
-    model = emissions_by_sector(n, get_sector)
+    model = emissions_by_sector(n)
     if "reference" in snakemake.input.keys():
         reference = load_reference(
             snakemake.input["reference"], year, snakemake.params["reference_map"]
@@ -248,7 +216,7 @@ if __name__ == "__main__":
 
     model = group_sectors(model, snakemake.params["model_sector_groups"])
     emissions = build_emissions_table(model, reference)
-    fuel_use = fuel_use_by_sector(n, snakemake.params["fuels"], get_sector)
+    fuel_use = fuel_use_by_sector(n, snakemake.params["fuels"])
 
     for output in snakemake.output:
         os.makedirs(os.path.dirname(output), exist_ok=True)
