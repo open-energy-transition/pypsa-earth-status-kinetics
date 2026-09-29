@@ -17,10 +17,6 @@ Commission Joint Research Centre, https://edgar.jrc.ec.europa.eu, CC BY 4.0.
 
 import logging
 import os
-import posixpath
-import re
-import zipfile
-import xml.etree.ElementTree as ET
 
 import country_converter as coco
 import pandas as pd
@@ -29,92 +25,8 @@ from helpers import configure_logging, create_country_list
 logger = logging.getLogger(__name__)
 
 
-XLSX_NS = {
-    "main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
-    "rel": "http://schemas.openxmlformats.org/package/2006/relationships",
-}
-XLSX_REL_ID = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
-
-
-def read_xlsx_sheet(path, sheet_name):
-    """
-    Read one worksheet of an .xlsx file into a DataFrame, using the first row
-    as header.
-
-    Parses the workbook XML with the standard library so no Excel engine
-    (e.g. openpyxl) is needed. Cells are returned as strings; formulas are
-    read as their cached values.
-    """
-    with zipfile.ZipFile(path) as xlsx:
-        workbook = ET.fromstring(xlsx.read("xl/workbook.xml"))
-        sheets = {
-            sheet.get("name"): sheet.get(XLSX_REL_ID)
-            for sheet in workbook.iterfind("main:sheets/main:sheet", XLSX_NS)
-        }
-        if sheet_name not in sheets:
-            raise ValueError(
-                f"Sheet '{sheet_name}' not found in {path}; available: {list(sheets)}"
-            )
-
-        rels = ET.fromstring(xlsx.read("xl/_rels/workbook.xml.rels"))
-        targets = {
-            rel.get("Id"): rel.get("Target")
-            for rel in rels.iterfind("rel:Relationship", XLSX_NS)
-        }
-        target = targets[sheets[sheet_name]]
-        sheet_path = (
-            target.lstrip("/")
-            if target.startswith("/")
-            else posixpath.normpath(posixpath.join("xl", target))
-        )
-
-        shared_strings = []
-        if "xl/sharedStrings.xml" in xlsx.namelist():
-            strings = ET.fromstring(xlsx.read("xl/sharedStrings.xml"))
-            shared_strings = [
-                "".join(t.text or "" for t in si.iter(f"{{{XLSX_NS['main']}}}t"))
-                for si in strings.iterfind("main:si", XLSX_NS)
-            ]
-
-        sheet = ET.fromstring(xlsx.read(sheet_path))
-
-    rows = []
-    for row in sheet.iterfind("main:sheetData/main:row", XLSX_NS):
-        values = {}
-        for cell in row.iterfind("main:c", XLSX_NS):
-            column = re.match(r"[A-Z]+", cell.get("r")).group()
-            cell_type = cell.get("t")
-            if cell_type == "inlineStr":
-                value = "".join(
-                    t.text or "" for t in cell.iter(f"{{{XLSX_NS['main']}}}t")
-                )
-            else:
-                v = cell.find("main:v", XLSX_NS)
-                if v is None:
-                    continue
-                value = shared_strings[int(v.text)] if cell_type == "s" else v.text
-            values[column] = value
-        rows.append(values)
-
-    if not rows:
-        return pd.DataFrame()
-
-    def column_index(letters):
-        index = 0
-        for letter in letters:
-            index = index * 26 + ord(letter) - ord("A") + 1
-        return index
-
-    columns = sorted({c for row in rows for c in row}, key=column_index)
-    table = pd.DataFrame(
-        [[row.get(c) for c in columns] for row in rows], columns=columns
-    )
-    table.columns = table.iloc[0]
-    return table.iloc[1:].reset_index(drop=True)
-
-
 def read_edgar_by_sector(path, sheet_name):
-    df = read_xlsx_sheet(path, sheet_name)
+    df = pd.read_excel(path, sheet_name=sheet_name, engine="openpyxl")
     df.columns = [str(c).strip() for c in df.columns]
     df = df[df["Substance"] == "CO2"]
     year_columns = [c for c in df.columns if c.isdigit()]
