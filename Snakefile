@@ -298,6 +298,85 @@ rule visualize_data:
         "scripts/visualize_data.py"
 
 
+sector_emissions_config = config.get("sector_emissions", {})
+reference_source = sector_emissions_config.get("reference_source", "none")
+edgar_config = sector_emissions_config.get("edgar", {})
+csv_reference_config = sector_emissions_config.get("csv", {})
+sector_emissions_year = sector_emissions_config.get("reference_year") or years[0]
+edgar_file = "data/edgar/" + os.path.basename(edgar_config.get("url", "edgar.xlsx"))
+
+
+rule retrieve_edgar_co2:
+    input:
+        edgar=storage.HTTP(edgar_config.get("url", "")),
+    output:
+        edgar=edgar_file,
+    run:
+        os.makedirs(os.path.dirname(output.edgar), exist_ok=True)
+        copyfile(input.edgar, output.edgar)
+
+
+rule build_reference_co2_edgar:
+    input:
+        edgar=edgar_file,
+    output:
+        reference=f"{reference_statistics_dir}/co2_emissions_by_sector.csv",
+    log:
+        f"{logs_dir}/build_reference_co2_edgar.log",
+    params:
+        countries=countries,
+        year=sector_emissions_year,
+        sheet=edgar_config.get("sheet", "fossil_CO2_by_sector_country_su"),
+        sector_map=edgar_config.get("sector_map", {}),
+    script:
+        "scripts/build_reference_co2_edgar.py"
+
+
+def sector_emissions_inputs(wildcards):
+    inputs = {"network": network_path}
+    if reference_source == "edgar":
+        inputs["reference"] = f"{reference_statistics_dir}/co2_emissions_by_sector.csv"
+    elif reference_source == "csv":
+        inputs["reference"] = csv_reference_config["path"]
+    elif reference_source not in ("none", "", None):
+        raise ValueError(
+            f"Unknown sector_emissions.reference_source '{reference_source}'. "
+            "Use 'edgar', 'csv' or 'none'."
+        )
+    return inputs
+
+
+def sector_emissions_reference_config():
+    return {"edgar": edgar_config, "csv": csv_reference_config}.get(
+        reference_source, {}
+    )
+
+
+rule plot_sector_emissions:
+    input:
+        unpack(sector_emissions_inputs),
+    output:
+        co2_table=f"{results_dir}/tables/co2_emissions_by_sector.csv",
+        fuel_table=f"{results_dir}/tables/fuel_use_by_sector.csv",
+        plot_co2=f"{results_dir}/figures/co2_emissions_by_sector.png",
+        plot_fuel=f"{results_dir}/figures/fuel_use_by_sector.png",
+    log:
+        f"{logs_dir}/plot_sector_emissions.log",
+    params:
+        reference_year=sector_emissions_year,
+        reference_label=sector_emissions_reference_config().get(
+            "label", "Reference"
+        ),
+        reference_map=csv_reference_config.get("sector_map", {}),
+        model_sector_groups=sector_emissions_reference_config().get(
+            "model_sector_groups", {}
+        ),
+        fuels=sector_emissions_config.get("fuels", ["coal", "oil", "gas"]),
+        carrier_sector_map=sector_emissions_config.get("carrier_sector_map", {}),
+    script:
+        "scripts/plot_sector_emissions.py"
+
+
 rule create_example_DE:
     output:
         "resources/example_DE.nc",
