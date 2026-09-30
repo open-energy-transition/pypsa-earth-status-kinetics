@@ -16,9 +16,9 @@ datasets:
 
 network_validation:
   name: "validation_name" # Unique identifier for the validation run. Change it to keep outputs from different validation configurations separate.
-  network_path: "resources/example_DE.nc" # File to the PyPSA network file to validate
-  year: [2021]  # year of the network to validate
-  countries: ['DE', 'FR']  # country of the network to validate
+  network_path: "../../results/US_2023/postnetworks/elec_s_100_ec_lv1_Co2L-168h_168h_2020_0.07.nc" # File to the PyPSA network file to validate
+  year: [2023]  # year of the network to validate
+  countries: ['US']  # country of the network to validate
   shapefile: false
   validate_cross_border_capacity: true # validation of cross border capacity
   fallback_pypsa_earth_version: ""  # recorded when the network carries no version metadata; leave empty rather than asserting a version that may be wrong
@@ -44,6 +44,40 @@ network_validation:
   #     countries: ["ZA", "BW", "LS", "MW", "MZ"]
 
 
+sector_emissions:  # used by the plot_sector_emissions rule (sector-coupled networks only)
+  reference_source: "edgar"  # "edgar" (downloaded automatically), "csv" (a local file, e.g. an IEA download) or "none" (model only)
+  reference_year: null  # year to compare against; defaults to the first entry of network_validation.year
+  edgar:
+    label: "EDGAR"
+    # EDGAR GHG booklet, fossil CO2 only, MtCO2/yr per country and sector. CC BY 4.0, https://edgar.jrc.ec.europa.eu/report_2025
+    url: "https://edgar.jrc.ec.europa.eu/booklet/EDGAR_2025_GHG_booklet_2025_fossilCO2only.xlsx"
+    sheet: "fossil_CO2_by_sector_country_su"
+    sector_map:  # EDGAR sector -> model sector
+      "Power Industry": "power_and_heat_generation"
+      "Transport": "transport"
+      "Industrial Combustion": "industry"
+      "Processes": "industry_process_emissions"
+      "Buildings": "buildings"
+      "Agriculture": "agriculture"
+      "Fuel Exploitation": "fuel_exploitation"
+      "Waste": "waste"
+    model_sector_groups:  # EDGAR reports residential and services together as buildings
+      "residential": "buildings"
+      "services": "buildings"
+  csv:
+    label: "IEA"
+    path: ""  # CSV with columns: <sector label>, Value [MtCO2], Year, Units (IEA data explorer download format)
+    sector_map:  # reference sector label -> model sector
+      "Electricity and heat producers": "power_and_heat_generation"
+      "Transport Sector": "transport"
+      "Industry Sector": "industry"
+      "Residential": "residential"
+      "Commercial and Public Services": "services"
+      "Agriculture/Forestry": "agriculture"
+    model_sector_groups: {}
+  fuels: ["coal", "oil", "gas"]  # bus carriers to report fuel withdrawals for
+  fuel_colors: {"coal": "#2a78d6", "oil": "#eb6834", "gas": "#1baf7a"}
+  model_colors: {"model": "#2a78d6", "reference": "#eb6834"}
 plot_osm_grid_network:
   grid_path: "tests/fixtures"
   line_voltages: [132., 220., 300., 380., 500., 750.]
