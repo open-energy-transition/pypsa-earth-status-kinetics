@@ -76,8 +76,8 @@ sector_emissions:  # used by the plot_sector_emissions rule (sector-coupled netw
       "Agriculture/Forestry": "agriculture"
     model_sector_groups: {}
   fuels: ["coal", "oil", "gas"]  # bus carriers to report fuel withdrawals for
-
-
+  fuel_colors: {"coal": "#2a78d6", "oil": "#eb6834", "gas": "#1baf7a"}
+  model_colors: {"model": "#2a78d6", "reference": "#eb6834"}
 plot_osm_grid_network:
   grid_path: "tests/fixtures"
   line_voltages: [132., 220., 300., 380., 500., 750.]

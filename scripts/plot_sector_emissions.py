@@ -26,14 +26,6 @@ from helpers import configure_logging
 
 logger = logging.getLogger(__name__)
 
-COMPONENTS = ["Load", "Link"]
-UNASSIGNED = "unassigned"
-
-MODEL_COLOR = "#2a78d6"
-REFERENCE_COLOR = "#eb6834"
-FUEL_COLORS = {"coal": "#2a78d6", "oil": "#eb6834", "gas": "#1baf7a"}
-
-
 def statistic_by_sector(n, statistic, **kwargs):
     """
     Evaluate an ``n.statistics`` method for Loads and Links and sum it per
@@ -42,30 +34,19 @@ def statistic_by_sector(n, statistic, **kwargs):
     """
     method = getattr(n.statistics, statistic)
     try:
-        result = method(comps=COMPONENTS, groupby="sector", **kwargs)
+        result = method(comps=["Load", "Link"], groupby="sector", **kwargs)
     except KeyError:
         logger.warning(
-            f"Loads or Links have no 'sector' column; reporting all as '{UNASSIGNED}'."
+            f"Loads or Links have no 'sector' column; reporting all as 'unassigned'."
         )
-        result = method(comps=COMPONENTS, groupby=False, **kwargs)
-        return pd.Series({UNASSIGNED: result.sum()}) if not result.empty else result
+        result = method(comps=["Load", "Link"], groupby=False, **kwargs)
+        return pd.Series({'unassigned': result.sum()}) if not result.empty else result
 
     if result.empty:
         return pd.Series(dtype=float)
 
     sectors = result.index.get_level_values("sector").fillna("")
-    return result.groupby(sectors.where(sectors != "", UNASSIGNED)).sum()
-
-
-def emissions_by_sector(n):
-    """
-    Net CO2 emitted to the atmosphere per sector [MtCO2].
-
-    Uses the energy balance at buses with carrier ``co2``: positive values are
-    CO2 added to the atmosphere, negative values are CO2 removed.
-    """
-    balance = statistic_by_sector(n, "energy_balance", bus_carrier="co2")
-    return (balance / 1e6).rename("model")
+    return result.groupby(sectors.where(sectors != "", "unassigned")).sum()
 
 
 def fuel_use_by_sector(n, fuels):
@@ -117,16 +98,6 @@ def load_reference(path, year, reference_map):
     return reference.groupby(level=0).sum().rename("reference")
 
 
-def group_sectors(series, sector_groups):
-    """
-    Merge model sectors into the reference's categories, e.g. residential and
-    services into buildings.
-    """
-    if not sector_groups or series.empty:
-        return series
-    return series.rename(index=sector_groups).groupby(level=0).sum()
-
-
 def build_emissions_table(model, reference):
     table = pd.concat([model, reference], axis=1)
     if "reference" not in table:
@@ -137,37 +108,33 @@ def build_emissions_table(model, reference):
     return table.sort_values("model", ascending=False)
 
 
-def style_axis(ax):
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    ax.set_xlabel("")
-    ax.axhline(0, color="black", linewidth=0.8)
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
-
-
-def plot_emissions(table, year, output_path, reference_label="Reference"):
+def plot_emissions(table, year, output_path, model_colors, reference_label="Reference"):
     fig, ax = plt.subplots(figsize=(9, 5))
     has_reference = table["reference"].notna().any()
 
     if has_reference:
         table[["reference", "model"]].rename(
             columns={"reference": f"{reference_label} ({year})", "model": "Model"}
-        ).plot.bar(ax=ax, color=[REFERENCE_COLOR, MODEL_COLOR], zorder=3)
+        ).plot.bar(ax=ax, color=[model_colors[k] for k in ["reference", "model"]], zorder=3)
         ax.legend(frameon=False)
         ax.set_title("CO2 emissions by sector: reference vs. model")
     else:
-        table["model"].plot.bar(ax=ax, color=MODEL_COLOR, zorder=3)
+        table["model"].plot.bar(ax=ax, color=model_colors["model"], zorder=3)
         ax.set_title("CO2 emissions by sector (model)")
 
     ax.set_ylabel("CO2 emissions [MtCO2]")
     ax.grid(axis="y", alpha=0.3, zorder=0)
-    style_axis(ax)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.set_xlabel("")
+    ax.axhline(0, color="black", linewidth=0.8)
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
     plt.close(fig)
 
 
-def plot_fuel_use(fuel_use, output_path):
+def plot_fuel_use(fuel_use, output_path, fuel_colors):
     fig, ax = plt.subplots(figsize=(9, 5))
 
     if fuel_use.empty or not fuel_use.to_numpy().any():
@@ -178,7 +145,7 @@ def plot_fuel_use(fuel_use, output_path):
         fuel_use.loc[order].plot.bar(
             ax=ax,
             stacked=True,
-            color=[FUEL_COLORS.get(f) for f in fuel_use.columns],
+            color=[fuel_colors.get(f) for f in fuel_use.columns],
             edgecolor="white",
             linewidth=0.5,
             zorder=3,
@@ -187,7 +154,11 @@ def plot_fuel_use(fuel_use, output_path):
         ax.set_title("Fossil fuel use by sector")
         ax.legend(title="Fuel", frameon=False)
         ax.grid(axis="y", alpha=0.3, zorder=0)
-        style_axis(ax)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.set_xlabel("")
+        ax.axhline(0, color="black", linewidth=0.8)
+        plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
 
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
@@ -206,7 +177,9 @@ if __name__ == "__main__":
     year = int(snakemake.params["reference_year"])
     n = pypsa.Network(snakemake.input["network"])
 
-    model = emissions_by_sector(n)
+    energy_balance = statistic_by_sector(n, "energy_balance", bus_carrier="co2")
+    energy_balance = (energy_balance / 1e6).rename("model")
+    
     if "reference" in snakemake.input.keys():
         reference = load_reference(
             snakemake.input["reference"], year, snakemake.params["reference_map"]
@@ -214,7 +187,8 @@ if __name__ == "__main__":
     else:
         reference = pd.Series(dtype=float, name="reference")
 
-    model = group_sectors(model, snakemake.params["model_sector_groups"])
+    model = energy_balance.rename(index=snakemake.params["model_sector_groups"]).groupby(level=0).sum()
+    
     emissions = build_emissions_table(model, reference)
     fuel_use = fuel_use_by_sector(n, snakemake.params["fuels"])
 
@@ -227,9 +201,10 @@ if __name__ == "__main__":
         emissions,
         year,
         snakemake.output["plot_co2"],
+        snakemake.params["model_colors"],
         reference_label=snakemake.params["reference_label"],
     )
-    plot_fuel_use(fuel_use, snakemake.output["plot_fuel"])
+    plot_fuel_use(fuel_use, snakemake.output["plot_fuel"], snakemake.params["fuel_colors"])
 
     logger.info(f"CO2 emissions by sector [MtCO2]:\n{emissions.round(1)}")
     logger.info(f"Fuel use by sector [TWh]:\n{fuel_use.round(1)}")

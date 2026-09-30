@@ -368,10 +368,12 @@ rule plot_sector_emissions:
             "label", "Reference"
         ),
         reference_map=csv_reference_config.get("sector_map", {}),
-        model_sector_groups=sector_emissions_reference_config().get(
+        model_sector_groups=config["sector_emissions"].get(
             "model_sector_groups", {}
         ),
-        fuels=sector_emissions_config.get("fuels", ["coal", "oil", "gas"]),
+        fuels=config["sector_emissions"].get("fuels", ["coal", "oil", "gas"]),
+        fuel_colors=config["sector_emissions"]["fuel_colors"],
+        model_colors=config["sector_emissions"]["model_colors"],
     script:
         "scripts/plot_sector_emissions.py"
 
