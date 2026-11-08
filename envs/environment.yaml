@@ -17,8 +17,8 @@ dependencies:
 - pandas
 - pulp <2.8
 - pyproj
-- pypsa >=0.25,<=0.30
+- pypsa >=1.2.4,<2
 - pyyaml
 - shapely
-- snakemake-minimal
+- snakemake-minimal >=9,<10
 - snakemake-storage-plugin-http
