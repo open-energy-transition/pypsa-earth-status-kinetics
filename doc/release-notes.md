@@ -10,8 +10,9 @@ SPDX-License-Identifier: CC-BY-4.0
 
 ### New Features and Major Changes
 
-* [Add EDGAR-based CO2 emissions validation for electricity-only and sector-coupled networks PR #86](https://github.com/pypsa-meets-earth/pypsa-earth-status/pull/86)
+* [Add OSM-based transmission topology, voltage representation, and capacity-preservation validation PR #85](https://github.com/pypsa-meets-earth/pypsa-earth-status/pull/85)
 
+* [Add EDGAR-based CO2 emissions validation for electricity-only and sector-coupled networks PR #86](https://github.com/pypsa-meets-earth/pypsa-earth-status/pull/86)
 
 * [Support electricity validation for sector-coupled networks PR #70](https://github.com/pypsa-meets-earth/pypsa-earth-status/pull/70)
 
