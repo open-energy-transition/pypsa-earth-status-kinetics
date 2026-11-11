@@ -418,6 +418,7 @@ rule visualize_data:
         co2_validation_summary=f"{results_dir}/tables/co2_emissions_validation_summary.csv",
         co2_carrier_plot=f"{results_dir}/figures/co2_emissions_by_carrier.png",
         co2_comparison_plot=f"{results_dir}/figures/co2_emissions_comparison.png",
+        transmission_validation=rules.validate_transmission_network.input,
     output:
         plot_demand=f"{results_dir}/figures/demand_comparison.png",
         plot_installed_capacity=(
