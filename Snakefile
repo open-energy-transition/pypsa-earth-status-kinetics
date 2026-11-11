@@ -32,6 +32,24 @@ years = validation_config["year"]
 
 validation_name = validation_config["name"]
 
+transmission_validation_config = config.get("transmission_validation", {})
+
+transmission_osm_lines = transmission_validation_config.get(
+    "osm_lines",
+    os.path.join(
+        config["plot_osm_grid_network"]["grid_path"],
+        "all_lines_build_network.geojson",
+    ),
+)
+
+transmission_osm_buses = transmission_validation_config.get(
+    "osm_buses",
+    os.path.join(
+        config["plot_osm_grid_network"]["grid_path"],
+        "all_buses_build_network.geojson",
+    ),
+)
+
 reference_statistics_dir = "resources/reference_statistics"
 network_statistics_dir = "resources/network_statistics"
 results_dir = "results"
@@ -226,6 +244,123 @@ rule build_network_statistics:
         "scripts/build_network_statistics.py"
 
 
+rule build_bus_regions:
+    input:
+        network_path=network_path,
+        osm_lines=transmission_osm_lines,
+    output:
+        regions=f"{network_statistics_dir}/bus_regions.geojson",
+        mapping=f"{network_statistics_dir}/bus_region_map.csv",
+    log:
+        f"{logs_dir}/build_bus_regions.log",
+    script:
+        "scripts/build_bus_regions.py"
+
+
+rule build_transmission_statistics:
+    input:
+        network_path=network_path,
+        bus_region_map=f"{network_statistics_dir}/bus_region_map.csv",
+    output:
+        corridors=f"{network_statistics_dir}/pypsa_transmission_corridors.csv",
+    log:
+        f"{logs_dir}/build_transmission_statistics.log",
+    script:
+        "scripts/build_transmission_statistics.py"
+
+
+rule build_osm_transmission_statistics:
+    input:
+        osm_lines=transmission_osm_lines,
+        osm_buses=transmission_osm_buses,
+        bus_regions=f"{network_statistics_dir}/bus_regions.geojson",
+    output:
+        corridors=f"{reference_statistics_dir}/osm_transmission_corridors.csv",
+    log:
+        f"{logs_dir}/build_osm_transmission_statistics.log",
+    script:
+        "scripts/build_osm_transmission_statistics.py"
+
+
+rule compare_transmission_topology:
+    input:
+        pypsa=rules.build_transmission_statistics.output.corridors,
+        osm=rules.build_osm_transmission_statistics.output.corridors,
+    output:
+        comparison=f"{results_dir}/tables/transmission_corridors.csv",
+        summary=f"{results_dir}/tables/transmission_summary.csv",
+    log:
+        f"{logs_dir}/compare_transmission_topology.log",
+    script:
+        "scripts/compare_transmission_topology.py"
+
+
+rule build_transmission_capacity_comparison:
+    input:
+        network_path=network_path,
+        osm_lines=transmission_osm_lines,
+        osm_buses=transmission_osm_buses,
+        bus_regions=rules.build_bus_regions.output.regions,
+        comparison=rules.compare_transmission_topology.output.comparison,
+    output:
+        capacity_comparison=(
+            f"{results_dir}/tables/" "transmission_capacity_comparison.csv"
+        ),
+        voltage_representation=(
+            f"{results_dir}/tables/" "transmission_voltage_representation.csv"
+        ),
+    log:
+        f"{logs_dir}/build_transmission_capacity_comparison.log",
+    script:
+        "scripts/build_transmission_capacity_comparison.py"
+
+
+rule plot_transmission_capacity_validation:
+    input:
+        capacity_comparison=(
+            rules.build_transmission_capacity_comparison.output.capacity_comparison
+        ),
+    output:
+        capacity_plot=(
+            f"{results_dir}/figures/" "transmission_capacity_preservation.png"
+        ),
+    log:
+        f"{logs_dir}/plot_transmission_capacity_validation.log",
+    script:
+        "scripts/plot_transmission_capacity_validation.py"
+
+
+rule plot_transmission_validation:
+    input:
+        comparison=rules.compare_transmission_topology.output.comparison,
+        voltage_representation=(
+            rules.build_transmission_capacity_comparison.output.voltage_representation
+        ),
+        bus_regions=rules.build_bus_regions.output.regions,
+    output:
+        topology_plot=f"{results_dir}/figures/transmission_topology_comparison.png",
+        voltage_plot=f"{results_dir}/figures/transmission_voltage_representation.png",
+    log:
+        f"{logs_dir}/plot_transmission_validation.log",
+    script:
+        "scripts/plot_transmission_validation.py"
+
+
+rule validate_transmission_network:
+    input:
+        comparison=rules.compare_transmission_topology.output.comparison,
+        summary=rules.compare_transmission_topology.output.summary,
+        voltage_representation=(
+            rules.build_transmission_capacity_comparison.output.voltage_representation
+        ),
+        topology_plot=rules.plot_transmission_validation.output.topology_plot,
+        voltage_plot=rules.plot_transmission_validation.output.voltage_plot,
+        capacity_comparison=(
+            rules.build_transmission_capacity_comparison.output.capacity_comparison
+        ),
+        capacity_plot=(rules.plot_transmission_capacity_validation.output.capacity_plot),
+
+
 rule make_comparison:
     input:
         demand_network=f"{network_statistics_dir}/demand.csv",
@@ -275,6 +410,13 @@ rule visualize_data:
             config["plot_osm_grid_network"]["grid_path"],
             "all_clean_substations.geojson",
         ),
+        co2_by_asset=f"{results_dir}/tables/co2_emissions_by_asset.csv",
+        co2_by_carrier=f"{results_dir}/tables/co2_emissions_by_carrier.csv",
+        co2_reference=f"{results_dir}/tables/co2_emissions_reference.csv",
+        co2_comparison=f"{results_dir}/tables/co2_emissions_comparison.csv",
+        co2_validation_summary=f"{results_dir}/tables/co2_emissions_validation_summary.csv",
+        co2_carrier_plot=f"{results_dir}/figures/co2_emissions_by_carrier.png",
+        co2_comparison_plot=f"{results_dir}/figures/co2_emissions_comparison.png",
     output:
         plot_demand=f"{results_dir}/figures/demand_comparison.png",
         plot_installed_capacity=(
@@ -295,6 +437,129 @@ rule visualize_data:
         plot_circuits=config["plot_osm_grid_network"]["plot_circuits"],
     script:
         "scripts/visualize_data.py"
+
+
+rule build_network_co2_statistics:
+    input:
+        network=network_path,
+        script="scripts/build_network_co2_statistics.py",
+    output:
+        summary=f"{results_dir}/tables/co2_emissions_by_carrier.csv",
+        detail=f"{results_dir}/tables/co2_emissions_by_asset.csv",
+    params:
+        year=years[0],
+    shell:
+        """
+        python {input.script:q} \\
+        --network {input.network:q} \\
+        --year {params.year} \\
+        --output {output.summary:q} \\
+        --detail-output {output.detail:q}
+        """
+
+
+rule plot_network_co2_emissions:
+    input:
+        statistics=f"{results_dir}/tables/co2_emissions_by_carrier.csv",
+        script="scripts/plot_co2_emissions.py",
+    output:
+        figure=f"{results_dir}/figures/co2_emissions_by_carrier.png",
+    shell:
+        """
+        python {input.script:q} \\
+        --input {input.statistics:q} \\
+        --output {output.figure:q} \\
+        --groupby carrier
+        """
+
+
+rule validate_co2:
+    input:
+        f"{results_dir}/tables/co2_emissions_by_asset.csv",
+        f"{results_dir}/figures/co2_emissions_by_carrier.png",
+
+
+rule retrieve_co2_edgar:
+    output:
+        "resources/clean/edgar_2025_fossilCO2.xlsx",
+    params:
+        url=(
+            "https://edgar.jrc.ec.europa.eu/booklet/"
+            "EDGAR_2025_GHG_booklet_2025_fossilCO2only.xlsx"
+        ),
+    shell:
+        """
+        curl -fL --retry 3 \
+            --output {output:q} \
+            {params.url:q}
+        """
+
+
+rule build_reference_co2_edgar:
+    input:
+        workbook="resources/clean/edgar_2025_fossilCO2.xlsx",
+        network=network_path,
+        script="scripts/build_reference_co2_edgar.py",
+    output:
+        reference=f"{results_dir}/tables/co2_emissions_reference.csv",
+    params:
+        countries=config["network_validation"]["countries"],
+        comparison_year=config.get("sector_emissions", {}).get("comparison_year", 0),
+    shell:
+        """
+        python {input.script:q} \\
+        --input {input.workbook:q} \\
+        --network {input.network:q} \\
+        --comparison-year {params.comparison_year} \\
+        --countries {params.countries} \\
+        --output {output.reference:q}
+        """
+
+
+rule compare_co2_emissions:
+    input:
+        model=f"{results_dir}/tables/co2_emissions_by_asset.csv",
+        reference=f"{results_dir}/tables/co2_emissions_reference.csv",
+        mapping="config/co2_sector_mapping.yaml",
+        network=network_path,
+        script="scripts/compare_co2_emissions.py",
+    output:
+        comparison=f"{results_dir}/tables/co2_emissions_comparison.csv",
+        summary=f"{results_dir}/tables/co2_emissions_validation_summary.csv",
+    shell:
+        """
+        python {input.script:q} \
+            --model {input.model:q} \
+            --reference {input.reference:q} \
+            --mapping {input.mapping:q} \
+            --network {input.network:q} \
+            --output {output.comparison:q} \
+            --summary-output {output.summary:q}
+        """
+
+
+rule plot_co2_comparison:
+    input:
+        comparison=f"{results_dir}/tables/co2_emissions_comparison.csv",
+        script="scripts/plot_co2_comparison.py",
+    output:
+        figure=f"{results_dir}/figures/co2_emissions_comparison.png",
+    shell:
+        """
+        python {input.script:q} \
+            --input {input.comparison:q} \
+            --output {output.figure:q}
+        """
+
+
+rule validate_co2_comparison:
+    input:
+        f"{results_dir}/tables/co2_emissions_by_asset.csv",
+        f"{results_dir}/figures/co2_emissions_by_carrier.png",
+        f"{results_dir}/tables/co2_emissions_reference.csv",
+        f"{results_dir}/tables/co2_emissions_comparison.csv",
+        f"{results_dir}/tables/co2_emissions_validation_summary.csv",
+        f"{results_dir}/figures/co2_emissions_comparison.png",
 
 
 rule create_example_DE:
