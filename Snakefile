@@ -4,6 +4,7 @@
 
 import os
 import sys
+from pathlib import Path
 
 sys.path.append("./scripts")
 
@@ -33,6 +34,7 @@ years = validation_config["year"]
 validation_name = validation_config["name"]
 
 transmission_validation_config = config.get("transmission_validation", {})
+fuel_validation_config = config.get("fuel_validation", {})
 
 transmission_osm_lines = transmission_validation_config.get(
     "osm_lines",
@@ -417,6 +419,15 @@ rule visualize_data:
         co2_validation_summary=f"{results_dir}/tables/co2_emissions_validation_summary.csv",
         co2_carrier_plot=f"{results_dir}/figures/co2_emissions_by_carrier.png",
         co2_comparison_plot=f"{results_dir}/figures/co2_emissions_comparison.png",
+        fuel_by_asset=f"{results_dir}/tables/fuel_consumption_by_asset.csv",
+        fuel_by_carrier=f"{results_dir}/tables/fuel_consumption_by_carrier.csv",
+        fuel_reference=f"{results_dir}/tables/fuel_consumption_reference.csv",
+        fuel_comparison=f"{results_dir}/tables/fuel_consumption_comparison.csv",
+        fuel_comparison_by_sector=f"{results_dir}/tables/fuel_consumption_comparison_by_sector.csv",
+        fuel_comparison_by_fuel=f"{results_dir}/tables/fuel_consumption_comparison_by_fuel.csv",
+        fuel_comparison_national=f"{results_dir}/tables/fuel_consumption_comparison_national.csv",
+        fuel_by_sector_plot=f"{results_dir}/figures/fuel_consumption_by_sector.png",
+        fuel_comparison_plot=f"{results_dir}/figures/fuel_consumption_comparison.png",
         transmission_validation=rules.validate_transmission_network.input,
     output:
         plot_demand=f"{results_dir}/figures/demand_comparison.png",
@@ -539,6 +550,146 @@ rule validate_co2_comparison:
         f"{results_dir}/tables/co2_emissions_comparison.csv",
         f"{results_dir}/tables/co2_emissions_validation_summary.csv",
         f"{results_dir}/figures/co2_emissions_comparison.png",
+
+
+rule build_network_fuel_statistics:
+    input:
+        network=network_path,
+        script="scripts/build_network_fuel_statistics.py",
+        mapping="config/fuel_sector_mapping.yaml",
+    output:
+        summary=f"{results_dir}/tables/fuel_consumption_by_carrier.csv",
+        detail=f"{results_dir}/tables/fuel_consumption_by_asset.csv",
+    params:
+        year=years[0],
+    shell:
+        """
+        python {input.script:q} --network {input.network:q} --year {params.year} --mapping {input.mapping:q} --output {output.summary:q} --detail-output {output.detail:q}
+        """
+
+
+rule compare_fuel_consumption:
+    input:
+        model=f"{results_dir}/tables/fuel_consumption_by_asset.csv",
+        reference=f"{results_dir}/tables/fuel_consumption_reference.csv",
+        mapping="config/fuel_sector_mapping.yaml",
+        network=network_path,
+        script="scripts/compare_fuel_consumption.py",
+    output:
+        by_sector_fuel=f"{results_dir}/tables/fuel_consumption_comparison.csv",
+        by_sector=f"{results_dir}/tables/fuel_consumption_comparison_by_sector.csv",
+        by_fuel=f"{results_dir}/tables/fuel_consumption_comparison_by_fuel.csv",
+        national=f"{results_dir}/tables/fuel_consumption_comparison_national.csv",
+    shell:
+        """
+        python {input.script:q} --model {input.model:q} --reference {input.reference:q} --mapping {input.mapping:q} --network {input.network:q} --output {output.by_sector_fuel:q} --sector-output {output.by_sector:q} --fuel-output {output.by_fuel:q} --national-output {output.national:q}
+        """
+
+
+rule plot_fuel_consumption_by_sector:
+    input:
+        statistics=f"{results_dir}/tables/fuel_consumption_by_asset.csv",
+        script="scripts/plot_fuel_consumption.py",
+    output:
+        figure=f"{results_dir}/figures/fuel_consumption_by_sector.png",
+    shell:
+        """
+        python {input.script:q} --input {input.statistics:q} --output {output.figure:q}
+        """
+
+
+rule plot_fuel_consumption_comparison:
+    input:
+        comparison=f"{results_dir}/tables/fuel_consumption_comparison.csv",
+        script="scripts/plot_fuel_comparison.py",
+    output:
+        figure=f"{results_dir}/figures/fuel_consumption_comparison.png",
+    shell:
+        """
+        python {input.script:q} --input {input.comparison:q} --output {output.figure:q}
+        """
+
+
+def existing_fuel_reference_inputs(wildcards):
+    """Track available UNSD inputs while allowing missing reference data."""
+    earth_path = Path(fuel_validation_config.get("pypsa_earth_path", "../pypsa-earth"))
+    unsd_path = Path(
+        fuel_validation_config.get("unsd_path", "../pypsa-earth/data/demand/unsd/data")
+    )
+    transactions_path = Path(
+        fuel_validation_config.get(
+            "transactions_path", "../pypsa-earth/data/unsd_transactions.csv"
+        )
+    )
+
+    sources = [
+        earth_path / "scripts/_helpers.py",
+        transactions_path,
+    ]
+
+    if unsd_path.is_dir():
+        sources.append(unsd_path)
+        sources.extend(sorted(unsd_path.glob("*.txt")))
+
+    return [str(source) for source in sources if source.exists()]
+
+
+rule build_reference_fuel_unsd:
+    input:
+        script="scripts/build_reference_fuel_unsd.py",
+        sources=existing_fuel_reference_inputs,
+    output:
+        reference=f"{results_dir}/tables/fuel_consumption_reference.csv",
+    params:
+        pypsa_earth_path=fuel_validation_config.get(
+            "pypsa_earth_path", "../pypsa-earth"
+        ),
+        unsd_path=fuel_validation_config.get(
+            "unsd_path", "../pypsa-earth/data/demand/unsd/data"
+        ),
+        transactions_path=fuel_validation_config.get(
+            "transactions_path", "../pypsa-earth/data/unsd_transactions.csv"
+        ),
+        countries=config["network_validation"]["countries"],
+        year=years[0],
+        stale_warning_years=fuel_validation_config.get(
+            "stale_observation_warning_years", 5
+        ),
+        shift_coal=(
+            "--shift-coal-to-elec"
+            if fuel_validation_config.get("shift_coal_to_elec", True)
+            else ""
+        ),
+        other_industries=(
+            "--include-other-industries"
+            if fuel_validation_config.get("include_other_industries", True)
+            else ""
+        ),
+    shell:
+        """
+        python {input.script:q} --pypsa-earth-path {params.pypsa_earth_path:q} --unsd-path {params.unsd_path:q} --transactions-path {params.transactions_path:q} --year {params.year} --countries {params.countries} {params.shift_coal} {params.other_industries} --stale-warning-years {params.stale_warning_years} --output {output.reference:q}
+        """
+
+
+rule validate_fuel_consumption:
+    input:
+        f"{results_dir}/tables/fuel_consumption_by_asset.csv",
+        f"{results_dir}/tables/fuel_consumption_by_carrier.csv",
+        f"{results_dir}/tables/fuel_consumption_reference.csv",
+        f"{results_dir}/tables/fuel_consumption_comparison.csv",
+        f"{results_dir}/tables/fuel_consumption_comparison_by_sector.csv",
+        f"{results_dir}/tables/fuel_consumption_comparison_by_fuel.csv",
+        f"{results_dir}/tables/fuel_consumption_comparison_national.csv",
+        f"{results_dir}/figures/fuel_consumption_by_sector.png",
+        f"{results_dir}/figures/fuel_consumption_comparison.png",
+
+
+rule validate_all:
+    input:
+        rules.visualize_data.output,
+        rules.validate_transmission_network.input,
+        rules.validate_co2_comparison.input,
+        rules.validate_fuel_consumption.input,
 
 
 rule create_example_DE:
