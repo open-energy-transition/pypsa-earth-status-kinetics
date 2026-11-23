@@ -576,3 +576,70 @@ rule build_health_status:
         ),
     script:
         "scripts/build_health_status.py"
+
+
+# Validation of annual electricity generation per prefecture against METI
+# statistics. Japan only: enabled with prefecture_generation_validation.enable
+# in config.yaml and when "JP" is in network_validation.countries.
+# Run with: snakemake -j1 validate_prefecture_generation
+prefecture_generation_config = config.get("prefecture_generation_validation", {})
+
+if "JP" in countries and prefecture_generation_config.get("enable", False):
+
+    rule build_reference_generation_meti_prefecture:
+        input:
+            workbook=prefecture_generation_config["meti_generation"],
+            settings=prefecture_generation_config["settings"],
+            script="scripts/build_reference_generation_meti_prefecture.py",
+        output:
+            reference=f"{results_dir}/tables/prefecture_generation_reference.csv",
+        log:
+            f"{logs_dir}/build_reference_generation_meti_prefecture.log",
+        params:
+            year=years[0],
+        shell:
+            """
+            python {input.script:q} --input {input.workbook:q} --config {input.settings:q} --year {params.year} --output {output.reference:q} 2>{log:q}
+            """
+
+    rule build_network_prefecture_generation:
+        input:
+            network=network_path,
+            shapes=prefecture_generation_config["prefecture_shapes"],
+            settings=prefecture_generation_config["settings"],
+            script="scripts/build_network_prefecture_generation.py",
+        output:
+            generation=f"{results_dir}/tables/prefecture_generation_model.csv",
+            bus_map=f"{results_dir}/tables/prefecture_generation_bus_map.csv",
+        log:
+            f"{logs_dir}/build_network_prefecture_generation.log",
+        shell:
+            """
+            python {input.script:q} --network {input.network:q} --shapes {input.shapes:q} --config {input.settings:q} --output {output.generation:q} --bus-output {output.bus_map:q} 2>{log:q}
+            """
+
+    rule compare_prefecture_generation:
+        input:
+            model=f"{results_dir}/tables/prefecture_generation_model.csv",
+            reference=f"{results_dir}/tables/prefecture_generation_reference.csv",
+            bus_map=f"{results_dir}/tables/prefecture_generation_bus_map.csv",
+            settings=prefecture_generation_config["settings"],
+            script="scripts/compare_prefecture_generation.py",
+        output:
+            comparison=f"{results_dir}/tables/prefecture_generation_comparison.csv",
+            region_comparison=f"{results_dir}/tables/region_generation_comparison.csv",
+            summary=f"{results_dir}/tables/prefecture_generation_validation_summary.csv",
+            plot_national=f"{results_dir}/figures/prefecture_generation_national.png",
+            plot_prefecture=f"{results_dir}/figures/prefecture_generation_by_carrier.png",
+            plot_prefecture_total=f"{results_dir}/figures/prefecture_generation_total.png",
+            plot_region=f"{results_dir}/figures/region_generation_by_carrier.png",
+        log:
+            f"{logs_dir}/compare_prefecture_generation.log",
+        shell:
+            """
+            python {input.script:q} --model {input.model:q} --reference {input.reference:q} --bus-map {input.bus_map:q} --config {input.settings:q} --output {output.comparison:q} --region-output {output.region_comparison:q} --summary-output {output.summary:q} --plot-national {output.plot_national:q} --plot-prefecture {output.plot_prefecture:q} --plot-prefecture-total {output.plot_prefecture_total:q} --plot-region {output.plot_region:q} 2>{log:q}
+            """
+
+    rule validate_prefecture_generation:
+        input:
+            rules.compare_prefecture_generation.output,

@@ -10,6 +10,8 @@ SPDX-License-Identifier: CC-BY-4.0
 
 ### New Features and Major Changes
 
+* [Add METI-based electricity generation validation per prefecture for Japan, for electricity-only and sector-coupled networks PR #8](https://github.com/open-energy-transition/pypsa-earth-status-kinetics/pull/8)
+
 * [Add EDGAR-based CO2 emissions validation for electricity-only and sector-coupled networks PR #86](https://github.com/pypsa-meets-earth/pypsa-earth-status/pull/86)
 
 * [Add OSM-based transmission topology, voltage representation, and capacity-preservation validation PR #85](https://github.com/pypsa-meets-earth/pypsa-earth-status/pull/85)

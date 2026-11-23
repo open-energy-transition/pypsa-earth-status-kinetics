@@ -179,6 +179,7 @@ results/*
 # data files
 *.nc
 *.geojson
+!data/japan/japan_prefectures_2023.geojson
 *.txt
 data/ember/
 
