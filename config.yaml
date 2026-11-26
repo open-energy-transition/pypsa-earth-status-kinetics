@@ -76,5 +76,3 @@ prefecture_generation_validation:
   meti_generation: "data/japan/METI_Generation_2023.xlsx"  # calendar-year workbook compiled from METI fiscal-year files, sheet "<year>_Annual"
   prefecture_shapes: "data/japan/japan_prefectures_2023.geojson"  # MLIT N03 2023, built with scripts/build_japan_prefecture_shapes.py
   settings: "config/japan_prefecture_generation.yaml"  # carrier mapping, categories, regions
-
-
