@@ -10,7 +10,7 @@ PyPSA-Earth-Status compares the annual electricity generation of a solved PyPSA 
 
 ## Run the workflow
 
-The validation runs only for Japan. It needs `"JP"` in `network_validation.countries` and `prefecture_generation_validation.enable: true` in `config.yaml`:
+The validation runs only for Japan. It is enabled by default and included in `validate_all` whenever `"JP"` is in `network_validation.countries`; for networks without Japan it is skipped entirely:
 
 ```yaml
 network_validation:
@@ -19,11 +19,19 @@ network_validation:
   countries: ['JP']
 
 prefecture_generation_validation:
-  enable: true
-  meti_generation: "data/japan/METI_Generation_2023.xlsx"
-  prefecture_shapes: "data/japan/japan_prefectures_2023.geojson"
+  enable: true  # set to false to skip it for Japan networks
+  meti_generation: "data/japan/electricity_generation/METI_Generation_2023.xlsx"
+  prefecture_shapes: "data/japan/administrative_boundaries/japan_prefectures_2023.geojson"
   settings: "config/japan_prefecture_generation.yaml"
 ```
+
+It runs as part of the complete validation workflow:
+
+```bash
+snakemake -j 1 validate_all
+```
+
+or on its own:
 
 ```bash
 snakemake -j 1 validate_prefecture_generation
@@ -35,7 +43,7 @@ The reference year is taken from `network_validation.year` and selects the METI 
 
 The reference is the METI Electric Power Survey Statistics ([results archive](https://www.enecho.meti.go.jp/statistics/electric_power/ep002/results_archive.html)), monthly generation per prefecture and source.
 
-METI publishes the statistics per **fiscal year** (April to March). To match the calendar year of the network snapshots, the workbook `data/japan/METI_Generation_2023.xlsx` is compiled from two fiscal-year files:
+METI publishes the statistics per **fiscal year** (April to March). To match the calendar year of the network snapshots, the workbook `data/japan/electricity_generation/METI_Generation_2023.xlsx` is compiled from two fiscal-year files:
 
 - FY2022 file: January to March 2023
 - FY2023 file: April to December 2023
@@ -44,10 +52,10 @@ It has one sheet per month (`2023.1` to `2023.12`, unit 1,000 kWh) and their sum
 
 Source: 「電力調査統計」（資源エネルギー庁）(https://www.enecho.meti.go.jp/statistics/electric_power/ep002/results_archive.html)、PDL1.0 (https://www.digital.go.jp/resources/open_data/public_data_license_v1.0). Processed: monthly values of two fiscal-year files combined into a calendar year, biomass and waste separated from thermal, units converted to GWh. The content of the ANRE website is published under the Public Data License (Version 1.0), which is compatible with CC BY 4.0.
 
-The prefecture boundaries `data/japan/japan_prefectures_2023.geojson` are built from the MLIT National Land Numerical Information, Administrative Areas (N03), 2023 edition (boundaries as of 1 January 2023, [download page](https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N03-2023.html), nationwide file `N03-20230101_GML.zip`). The municipalities are merged by prefecture code and simplified with `scripts/build_japan_prefecture_shapes.py`:
+The prefecture boundaries `data/japan/administrative_boundaries/japan_prefectures_2023.geojson` are built from the MLIT National Land Numerical Information, Administrative Areas (N03), 2023 edition (boundaries as of 1 January 2023, [download page](https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N03-2023.html), nationwide file `N03-20230101_GML.zip`). The municipalities are merged by prefecture code and simplified with `scripts/build_japan_prefecture_shapes.py`:
 
 ```bash
-python scripts/build_japan_prefecture_shapes.py --input N03-23_230101.shp --output data/japan/japan_prefectures_2023.geojson
+python scripts/build_japan_prefecture_shapes.py --input N03-23_230101.shp --output data/japan/administrative_boundaries/japan_prefectures_2023.geojson
 ```
 
 Source: 「国土数値情報（行政区域データ）」（国土交通省）(https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N03-2023.html)（2026年11月19日取得）を加工して作成. Processed: municipalities merged to prefectures, English names added, boundaries simplified. The data is published under the [MLIT National Land Numerical Information terms of use](https://nlftp.mlit.go.jp/ksj/other/agreement_01.html), based on the Government of Japan Standard Terms of Use (Version 2.0) and compatible with CC BY 4.0.
@@ -59,22 +67,22 @@ Source: 「国土数値情報（行政区域データ）」（国土交通省）
     - Generators and storage units are counted only on electricity buses (`AC`, `DC`, `low voltage`). In sector-coupled networks, generators on fuel buses are fuel supply and solar thermal sits on heat buses; neither is electricity generation.
     - Storage units count discharge only (METI hydro includes pumped storage, so `PHS` is counted as hydro).
     - Power plants represented as Links in sector-coupled networks (fuel bus → electricity bus) are counted with their electricity output `-p1`, using `get_electricity_production_links` from `scripts/build_network_statistics.py`.
-    - `load shedding` and `H2 fuel cell` are not counted as generation.
+    - Carrier names are harmonized with `harmonize_electricity_carrier_names()` from `scripts/build_network_statistics.py`, as in the national electricity validation, so that e.g. rooftop PV, gas CHP and biomass CHP are included. `load shedding` and `H2 fuel cell` are not counted as generation.
 3. **Reference.** METI "thermal" already includes biomass and waste. Both are subtracted from thermal, so thermal is **fossil thermal only**, and biomass and waste are compared as their own categories.
 4. **Comparison.** Model and METI values are compared per prefecture and per region (8 standard regions of Japan).
 
 Compared categories:
 
-| PyPSA carrier | Category |
+| PyPSA carriers (harmonized name) | Category |
 | --- | --- |
-| CCGT, OCGT, coal, lignite, oil | thermal |
-| nuclear | nuclear |
-| hydro, ror, PHS | hydro |
-| onwind, offwind-ac, offwind-dc | wind |
-| solar | solar |
-| geothermal | geothermal |
-| biomass EOP | biomass |
-| — | waste |
+| CCGT, OCGT, coal, lignite, oil, gas/coal/oil CHP (`gas`, `coal`, `oil`) | thermal |
+| nuclear (`nuclear`) | nuclear |
+| hydro, ror, PHS (`hydro`) | hydro |
+| onwind, offwind-ac, offwind-dc, offwind-float (`onwind`, `offwind`, `offwind-float`) | wind |
+| solar, rooftop PV, csp, solar-hsat (`pv`, `solar-hsat`) | solar |
+| geothermal (`geothermal`) | geothermal |
+| biomass EOP, solid biomass CHP (`biomass`) | biomass |
+| waste CHP (`waste`) | waste |
 
 ## Output files
 
@@ -85,9 +93,9 @@ Files are written under `results/<validation_name>/`.
 | `tables/prefecture_generation_reference.csv` | METI generation per prefecture and category (GWh). |
 | `tables/prefecture_generation_model.csv` | Model generation per prefecture and category (GWh). |
 | `tables/prefecture_generation_bus_map.csv` | Grid bus to prefecture assignment, with the distance to the prefecture for snapped buses. |
-| `tables/prefecture_generation_comparison.csv` | Model versus METI per prefecture and category, with absolute and relative differences and whether the prefecture has a bus. |
-| `tables/region_generation_comparison.csv` | Model versus METI per region and category. |
-| `tables/prefecture_generation_validation_summary.csv` | National totals per category and misplaced generation per prefecture and per region. |
+| `tables/prefecture_generation_comparison.csv` | Model versus METI per prefecture and category, with absolute and relative differences, shares of the national total and whether the prefecture has a bus. |
+| `tables/region_generation_comparison.csv` | Model versus METI per region and category, with absolute and relative differences and shares of the national total. |
+| `tables/prefecture_generation_validation_summary.csv` | National totals per category, and normalized absolute error and spatial distribution error per prefecture and per region. |
 | `figures/prefecture_generation_national.png` | National totals per category. |
 | `figures/prefecture_generation_by_carrier.png` | Model versus METI per prefecture, one panel per category. |
 | `figures/prefecture_generation_total.png` | Model versus METI per prefecture, all categories together. |
@@ -97,7 +105,12 @@ Files are written under `results/<validation_name>/`.
 
 The network nodes do not follow prefecture borders. All generation of a node is counted in the prefecture where its bus is located, so generation can appear in a neighbouring prefecture, and prefectures without a bus show zero model generation (shaded grey in the prefecture figure).
 
-The summary reports the **misplaced generation** of each category: the sum of the absolute differences divided by the METI total, per prefecture and per region. If it drops strongly from prefecture to region level, most of the prefecture differences come from the location of the nodes rather than from the total generation of the model. A network with more nodes gives a more accurate prefecture comparison.
+The summary reports two indicators per category, per prefecture and per region:
+
+- **Normalized absolute error**: the sum of the absolute differences divided by the METI total. It combines the error in the total generation with the error in its geographical distribution.
+- **Spatial distribution error**: half the sum of the absolute differences between the model and METI shares of the national total (0% = same distribution, 100% = no overlap). It does not depend on the total generation, so it measures only where the generation is located.
+
+If the spatial distribution error drops strongly from prefecture to region level, most of the prefecture differences come from the location of the network nodes (clustering) rather than from the model. A network with more nodes gives a more accurate prefecture comparison.
 
 ## Scope and limitations
 

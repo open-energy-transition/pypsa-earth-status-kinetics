@@ -4,7 +4,7 @@
 
 """
 Build the prefecture boundaries of Japan used by the prefecture generation
-validation (``data/japan/japan_prefectures_<year>.geojson``).
+validation (``data/japan/administrative_boundaries/japan_prefectures_<year>.geojson``).
 
 One-off data preparation, not part of the Snakemake workflow. The prepared
 file is stored in the repository, so the large source data does not need to
@@ -27,7 +27,7 @@ Example::
 
     python scripts/build_japan_prefecture_shapes.py \\
         --input N03-2023/N03-23_230101.shp \\
-        --output data/japan/japan_prefectures_2023.geojson
+        --output data/japan/administrative_boundaries/japan_prefectures_2023.geojson
 """
 
 import argparse

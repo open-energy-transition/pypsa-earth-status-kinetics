@@ -68,11 +68,12 @@ fuel_validation:
   include_other_industries: true  # PyPSA-Earth keeps the unspecified ('other') industries in the model even with other_industries: false
 
 # Validation of annual electricity generation per prefecture against METI
-# Electric Power Survey Statistics (Japan only, needs "JP" in network_validation.countries).
-# The reference year is network_validation.year. Run with:
+# Electric Power Survey Statistics. Japan only: included in validate_all and run
+# automatically when "JP" is in network_validation.countries, skipped otherwise.
+# The reference year is network_validation.year. Standalone run:
 #   snakemake -j1 validate_prefecture_generation
 prefecture_generation_validation:
-  enable: true
-  meti_generation: "data/japan/METI_Generation_2023.xlsx"  # calendar-year workbook compiled from METI fiscal-year files, sheet "<year>_Annual"
-  prefecture_shapes: "data/japan/japan_prefectures_2023.geojson"  # MLIT N03 2023, built with scripts/build_japan_prefecture_shapes.py
+  enable: true  # set to false to skip it for Japan networks
+  meti_generation: "data/japan/electricity_generation/METI_Generation_2023.xlsx"  # calendar-year workbook compiled from METI fiscal-year files, sheet "<year>_Annual"
+  prefecture_shapes: "data/japan/administrative_boundaries/japan_prefectures_2023.geojson"  # MLIT N03 2023, built with scripts/build_japan_prefecture_shapes.py
   settings: "config/japan_prefecture_generation.yaml"  # carrier mapping, categories, regions

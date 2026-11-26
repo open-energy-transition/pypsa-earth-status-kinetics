@@ -12,14 +12,11 @@ the coast, get the nearest one). Other buses inherit the prefecture of their
 ``location``. All generation at a bus is counted for its prefecture, so the
 result gets more accurate the more nodes the network has.
 
-Works for electricity-only and sector-coupled networks:
-
-- Generators and storage units are counted only on electricity buses. In
-  sector-coupled networks, generators on fuel buses are fuel supply and
-  solar thermal sits on heat buses.
-- Power plants represented as Links (fuel bus -> electricity bus, see
-  ``convert_conventional_generators_to_links`` in PyPSA-Earth) are counted
-  with their electricity output ``-p1``.
+Works for electricity-only and sector-coupled networks. The generation per
+asset comes from ``get_electricity_generation_by_asset()`` in
+``build_network_statistics.py``, the same accounting as the national
+electricity validation; this script only adds the assignment to prefectures
+and the METI categories.
 """
 
 import argparse
@@ -30,22 +27,32 @@ import geopandas as gpd
 import pandas as pd
 import pypsa
 import yaml
-from build_network_statistics import get_electricity_production_links
+from build_network_statistics import (
+    get_electricity_generation_by_asset,
+    harmonize_electricity_carrier_names,
+)
 
 logger = logging.getLogger(__name__)
 
 METRIC_CRS = "EPSG:6933"
+COUNTRY = "JP"  # only Japanese buses are assigned to prefectures and counted
 GENERATION_COLUMNS = ["prefecture", "carrier", "model_GWh"]
 
 
 def assign_buses_to_prefectures(network, prefectures):
     """
-    Add a ``prefecture`` column to ``network.buses``.
+    Add a ``prefecture`` column to ``network.buses`` for the buses in Japan.
+
+    Only buses with ``country == "JP"`` are assigned, so in a multi-country
+    network, buses of other countries are not matched to a Japanese prefecture.
 
     Returns the spatial match of the grid buses (bus, x, y, prefecture,
     distance to the prefecture in metres).
     """
-    grid_buses = network.buses.query("carrier in ['AC', 'DC']")
+    in_japan = network.buses["country"] == COUNTRY
+    grid_buses = network.buses[in_japan & network.buses["carrier"].isin(["AC", "DC"])]
+    if grid_buses.empty:
+        raise ValueError(f"The network has no AC/DC buses with country '{COUNTRY}'")
 
     bus_points = gpd.GeoDataFrame(
         grid_buses[["x", "y"]],
@@ -67,84 +74,13 @@ def assign_buses_to_prefectures(network, prefectures):
 
     # other buses (H2, battery, low voltage ...) get the prefecture of their location
     location_prefecture = network.buses.loc[grid_buses.index, "prefecture"]
-    other = network.buses["prefecture"].isna()
+    other = network.buses["prefecture"].isna() & in_japan
     network.buses.loc[other, "prefecture"] = network.buses.loc[other, "location"].map(
         location_prefecture
     )
 
     bus_map = joined[["x", "y", "prefecture", "dist_m"]].rename_axis("bus")
     return bus_map.reset_index()
-
-
-def annual_generation_by_unit(network, settings):
-    """
-    Return annual electricity generation per unit (MWh).
-
-    Columns: ``bus``, ``carrier``, ``component``, ``MWh``.
-    """
-    weights = network.snapshot_weightings.generators
-
-    electricity_buses = network.buses.index[
-        network.buses.carrier.isin(settings["electricity_bus_carriers"])
-    ]
-
-    # generators on electricity buses
-    generators = pd.DataFrame(
-        {
-            "bus": network.generators.bus,
-            "carrier": network.generators.carrier,
-            "component": "Generator",
-            "MWh": network.generators_t.p.reindex(
-                columns=network.generators.index, fill_value=0.0
-            )
-            .mul(weights, axis=0)
-            .sum(),
-        }
-    )
-    generators = generators[generators["bus"].isin(electricity_buses)]
-
-    # storage units: only discharge counts as generation
-    storage = pd.DataFrame(
-        {
-            "bus": network.storage_units.bus,
-            "carrier": network.storage_units.carrier,
-            "component": "StorageUnit",
-            "MWh": network.storage_units_t.p.reindex(
-                columns=network.storage_units.index, fill_value=0.0
-            )
-            .clip(lower=0)
-            .mul(weights, axis=0)
-            .sum(),
-        }
-    )
-    storage = storage[storage["bus"].isin(electricity_buses)]
-
-    # power plants represented as links: electricity output is -p1
-    production_links = get_electricity_production_links(network)
-    links = pd.DataFrame(
-        {
-            "bus": network.links.loc[production_links, "bus1"],
-            "carrier": network.links.loc[production_links, "carrier"],
-            "component": "Link",
-            "MWh": (
-                -network.links_t.p1.reindex(columns=production_links, fill_value=0.0)
-            )
-            .clip(lower=0)
-            .mul(weights, axis=0)
-            .sum(),
-        }
-    )
-
-    units = pd.concat([generators, storage, links])
-    units = units[~units["carrier"].isin(settings["not_generation"])]
-
-    logger.info(
-        "Units counted: %d generators, %d storage units, %d links",
-        (units["component"] == "Generator").sum(),
-        (units["component"] == "StorageUnit").sum(),
-        (units["component"] == "Link").sum(),
-    )
-    return units
 
 
 def build_network_prefecture_generation(network, prefectures, settings):
@@ -156,9 +92,32 @@ def build_network_prefecture_generation(network, prefectures, settings):
     """
     bus_map = assign_buses_to_prefectures(network, prefectures)
 
-    units = annual_generation_by_unit(network, settings)
-    units["prefecture"] = units["bus"].map(network.buses["prefecture"])
+    # annual generation per asset (MWh), shared with build_network_statistics.py
+    units = get_electricity_generation_by_asset(network).rename(
+        columns={"generation": "MWh"}
+    )
+    # same carrier names as the national electricity validation
+    units["carrier"] = harmonize_electricity_carrier_names(units["carrier"])
+    units = units[~units["carrier"].isin(settings["not_generation"])]
 
+    logger.info(
+        "Units counted: %d generators, %d storage units, %d links",
+        (units["component"] == "Generator").sum(),
+        (units["component"] == "StorageUnit").sum(),
+        (units["component"] == "Link").sum(),
+    )
+
+    # only generation on buses in Japan is compared with METI
+    outside_japan = units["bus"].map(network.buses["country"]) != COUNTRY
+    if outside_japan.any():
+        logger.info(
+            "%d units outside Japan are not counted (%.1f TWh)",
+            outside_japan.sum(),
+            units.loc[outside_japan, "MWh"].sum() / 1e6,
+        )
+    units = units[~outside_japan]
+
+    units["prefecture"] = units["bus"].map(network.buses["prefecture"])
     no_prefecture = units["prefecture"].isna()
     if no_prefecture.any():
         logger.warning(

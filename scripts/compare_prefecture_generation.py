@@ -7,10 +7,16 @@ Compare the annual electricity generation per prefecture and source of a
 PyPSA network of Japan with the METI reference, per prefecture and per
 region, and plot the results.
 
-The "misplaced generation" in the summary is the sum of the absolute
-differences divided by the METI total of a category. Comparing it per
-prefecture and per region shows how much of the prefecture differences only
-come from where the cluster buses are located.
+The summary reports two indicators per category, per prefecture and per
+region:
+
+- normalized absolute error: sum of the absolute differences divided by the
+  METI total. It combines the error in the total generation with the error in
+  its geographical distribution.
+- spatial distribution error: half the sum of the absolute differences between
+  the model and METI shares of the national total (0 = same distribution,
+  100 = no overlap). It does not depend on the total, so it measures only the
+  geographical distribution, e.g. the effect of network clustering.
 """
 
 import argparse
@@ -40,6 +46,16 @@ def add_differences(table):
     return table
 
 
+def add_shares(table):
+    """Add each row's share of the national total of its category (%)."""
+    for source in ["model", "reference"]:
+        total = table.groupby("carrier")[f"{source}_GWh"].transform("sum")
+        table[f"{source}_share_pct"] = (
+            table[f"{source}_GWh"] / total.where(total > 0) * 100
+        )
+    return table
+
+
 def compare_prefectures(model, reference, bus_map):
     """Return one row per prefecture and category with model and reference."""
     comparison = model.merge(reference, on=["prefecture", "carrier"], how="outer")
@@ -47,7 +63,7 @@ def compare_prefectures(model, reference, bus_map):
         ["model_GWh", "reference_GWh"]
     ].fillna(0.0)
 
-    comparison = add_differences(comparison)
+    comparison = add_shares(add_differences(comparison))
     comparison["has_bus"] = comparison["prefecture"].isin(bus_map["prefecture"])
     return comparison
 
@@ -66,11 +82,16 @@ def compare_regions(comparison, regions):
         .sum()
         .reset_index()
     )
-    return add_differences(region_comparison)
+    return add_shares(add_differences(region_comparison))
 
 
-def misplaced_share(table, category):
-    """Sum of absolute differences in % of the reference total of a category."""
+def normalized_absolute_error(table, category):
+    """
+    Sum of the absolute differences in % of the reference total of a category.
+
+    Combines the error in the total generation with the error in its
+    geographical distribution. NaN if the reference total is zero.
+    """
     rows = table[table["carrier"] == category]
     total = rows["reference_GWh"].sum()
     if total == 0:
@@ -78,8 +99,24 @@ def misplaced_share(table, category):
     return rows["diff_GWh"].abs().sum() / total * 100
 
 
+def spatial_distribution_error(table, category):
+    """
+    Error in the geographical distribution of a category (%).
+
+    Half the sum of the absolute differences between the model and reference
+    shares of the national total: 0 means the same distribution, 100 means no
+    overlap. It does not depend on the total generation, so it measures only
+    where the generation is located. NaN if the model or reference total is
+    zero.
+    """
+    rows = table[table["carrier"] == category]
+    if rows["model_GWh"].sum() == 0 or rows["reference_GWh"].sum() == 0:
+        return np.nan
+    return 0.5 * (rows["model_share_pct"] - rows["reference_share_pct"]).abs().sum()
+
+
 def build_summary(comparison, region_comparison, categories):
-    """Return national totals and misplaced generation per category."""
+    """Return national totals and error indicators per category."""
     summary = (
         comparison.groupby("carrier")[["model_GWh", "reference_GWh"]]
         .sum()
@@ -92,12 +129,13 @@ def build_summary(comparison, region_comparison, categories):
         / summary["reference_TWh"].where(summary["reference_TWh"] > 0)
         - 1
     ) * 100
-    summary["misplaced_pct_prefecture"] = [
-        misplaced_share(comparison, c) for c in categories
-    ]
-    summary["misplaced_pct_region"] = [
-        misplaced_share(region_comparison, c) for c in categories
-    ]
+    for level, table in [("prefecture", comparison), ("region", region_comparison)]:
+        summary[f"normalized_absolute_error_pct_{level}"] = [
+            normalized_absolute_error(table, c) for c in categories
+        ]
+        summary[f"spatial_distribution_error_pct_{level}"] = [
+            spatial_distribution_error(table, c) for c in categories
+        ]
     return summary.rename_axis("carrier").reset_index()
 
 

@@ -10,35 +10,29 @@
 # Categories compared (METI categories), in plotting order
 categories: [thermal, nuclear, hydro, solar, wind, geothermal, biomass, waste]
 
-# Buses that carry electricity. Only generators and storage units on these
-# buses are counted (in sector-coupled networks, generators on fuel buses are
-# fuel supply and solar thermal sits on heat buses).
-electricity_bus_carriers: [AC, DC, low voltage]
+# Carrier names are first harmonized with harmonize_electricity_carrier_names()
+# from scripts/build_network_statistics.py (the same names as in the national
+# electricity validation), then mapped to the METI categories below.
 
-# Carriers that are not electricity generation
+# Harmonized carriers that are not counted as electricity generation
 not_generation:
-- load shedding
-- H2 fuel cell   # electricity from stored hydrogen, like a battery
-- H2 Fuel Cell   # same carrier, different spelling in sector-coupled networks
+- h2 fuel cell  # electricity from stored hydrogen, like a battery
 
-# PyPSA carrier -> METI category
+# Harmonized carrier -> METI category
 carrier_mapping:
-  CCGT: thermal
-  OCGT: thermal
-  coal: thermal
-  lignite: thermal
-  oil: thermal
+  coal: thermal  # coal, lignite, coal CHP
+  gas: thermal  # CCGT, OCGT, gas CHP
+  oil: thermal  # oil, oil CHP
   nuclear: nuclear
-  hydro: hydro
-  ror: hydro
-  PHS: hydro          # METI hydro includes pumped storage
+  hydro: hydro  # hydro, ror, PHS (METI hydro includes pumped storage)
   onwind: wind
-  offwind-ac: wind
-  offwind-dc: wind
-  solar: solar
+  offwind: wind  # offwind-ac, offwind-dc
+  offwind-float: wind
+  pv: solar  # solar, rooftop PV, csp
+  solar-hsat: solar
   geothermal: geothermal
-  biomass EOP: biomass  # sector-coupled networks: biomass power plant as link
-  # waste: not yet represented in the solved networks
+  biomass: biomass  # biomass EOP, solid biomass CHP
+  waste: waste  # not yet represented in the solved networks
 
 # METI Excel (sheet "<year>_Annual") column -> category
 # METI "thermal power plant" includes biomass and waste; they are subtracted
