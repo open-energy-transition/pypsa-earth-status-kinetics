@@ -70,7 +70,8 @@ fuel_validation:
 # Validation of annual electricity generation per prefecture against METI
 # Electric Power Survey Statistics. Japan only: included in validate_all and run
 # automatically when "JP" is in network_validation.countries, skipped otherwise.
-# The reference year is network_validation.year. Standalone run:
+# The latest available METI reference year is selected automatically.
+# Standalone run:
 #   snakemake -j1 validate_prefecture_generation
 prefecture_generation_validation:
   enable: true  # set to false to skip it for Japan networks

@@ -37,7 +37,7 @@ or on its own:
 snakemake -j 1 validate_prefecture_generation
 ```
 
-The reference year is taken from `network_validation.year` and selects the METI sheet `<year>_Annual`. The carrier mapping, the compared categories and the regions are maintained in `config/japan_prefecture_generation.yaml`.
+The latest available METI annual sheet (`<year>_Annual`) is selected automatically, independently of `network_validation.year`. Both years are reported in the comparison tables and figure titles. Future planning horizons are compared against the latest available historical reference. The carrier mapping, the compared categories and the regions are maintained in `config/japan_prefecture_generation.yaml`.
 
 ## Reference data
 

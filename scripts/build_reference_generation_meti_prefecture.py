@@ -22,6 +22,7 @@ https://www.digital.go.jp/resources/open_data/public_data_license_v1.0
 
 import argparse
 import logging
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -29,10 +30,10 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-REFERENCE_COLUMNS = ["prefecture", "carrier", "reference_GWh"]
+REFERENCE_COLUMNS = ["prefecture", "carrier", "reference_GWh", "reference_year"]
 
 
-def build_reference_meti(workbook, settings, year):
+def build_reference_meti(workbook, settings, year=None):
     """
     Return METI annual generation per prefecture and category in GWh.
 
@@ -42,16 +43,37 @@ def build_reference_meti(workbook, settings, year):
         METI Excel file with a sheet ``<year>_Annual``. Unit: 1,000 kWh (= MWh).
     settings : dict
         Content of ``config/japan_prefecture_generation.yaml``.
-    year : int
-        Reference year, used to select the sheet.
+    year : int or None
+        Reference year. If None, use the latest available annual sheet.
 
     Returns
     -------
     pandas.DataFrame
-        Columns ``prefecture``, ``carrier``, ``reference_GWh``.
+        Columns ``prefecture``, ``carrier``, ``reference_GWh``, ``reference_year``.
     """
-    sheet = f"{year}_Annual"
-    meti = pd.read_excel(workbook, sheet_name=sheet)
+    with pd.ExcelFile(workbook) as excel:
+        available_years = [
+            int(match.group(1))
+            for sheet_name in excel.sheet_names
+            if (match := re.fullmatch(r"(\d{4})_Annual", sheet_name))
+        ]
+
+        if not available_years:
+            raise ValueError(f"No annual METI reference sheets found in {workbook}")
+
+        if year is None:
+            year = max(available_years)
+
+        if year not in available_years:
+            raise ValueError(
+                f"METI reference year {year} is unavailable. "
+                f"Available years: {sorted(available_years)}"
+            )
+
+        sheet = f"{year}_Annual"
+        meti = pd.read_excel(excel, sheet_name=sheet)
+
+    logger.info("Selected METI reference year: %d", year)
 
     meti = meti.rename(columns={meti.columns[0]: "prefecture"})
     meti["prefecture"] = meti["prefecture"].astype(str).str.strip()
@@ -85,6 +107,7 @@ def build_reference_meti(workbook, settings, year):
         .reset_index()
     )
 
+    reference["reference_year"] = year
     return reference[REFERENCE_COLUMNS]
 
 
@@ -94,7 +117,12 @@ def main():
     parser.add_argument(
         "--config", required=True, help="config/japan_prefecture_generation.yaml"
     )
-    parser.add_argument("--year", type=int, required=True, help="Reference year")
+    parser.add_argument(
+        "--year",
+        type=int,
+        default=None,
+        help="Reference year (default: latest available)",
+    )
     parser.add_argument("--output", required=True, help="Output CSV")
     args = parser.parse_args()
 
@@ -111,7 +139,7 @@ def main():
 
     logger.info(
         "METI %s reference: %d prefectures, %d rows",
-        args.year,
+        reference["reference_year"].iloc[0],
         reference["prefecture"].nunique(),
         len(reference),
     )

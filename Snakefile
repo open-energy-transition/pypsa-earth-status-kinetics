@@ -847,11 +847,9 @@ if PREFECTURE_GENERATION_ENABLED:
             reference=f"{results_dir}/tables/prefecture_generation_reference.csv",
         log:
             f"{logs_dir}/build_reference_generation_meti_prefecture.log",
-        params:
-            year=years[0],
         shell:
             """
-            python {input.script:q} --input {input.workbook:q} --config {input.settings:q} --year {params.year} --output {output.reference:q} 2>{log:q}
+            python {input.script:q} --input {input.workbook:q} --config {input.settings:q} --output {output.reference:q} 2>{log:q}
             """
 
     rule build_network_prefecture_generation:
@@ -887,9 +885,11 @@ if PREFECTURE_GENERATION_ENABLED:
             plot_region=f"{results_dir}/figures/region_generation_by_carrier.png",
         log:
             f"{logs_dir}/compare_prefecture_generation.log",
+        params:
+            model_year=years[0],
         shell:
             """
-            python {input.script:q} --model {input.model:q} --reference {input.reference:q} --bus-map {input.bus_map:q} --config {input.settings:q} --output {output.comparison:q} --region-output {output.region_comparison:q} --summary-output {output.summary:q} --plot-national {output.plot_national:q} --plot-prefecture {output.plot_prefecture:q} --plot-prefecture-total {output.plot_prefecture_total:q} --plot-region {output.plot_region:q} 2>{log:q}
+            python {input.script:q} --model {input.model:q} --reference {input.reference:q} --bus-map {input.bus_map:q} --config {input.settings:q} --output {output.comparison:q} --region-output {output.region_comparison:q} --summary-output {output.summary:q} --model-year {params.model_year} --plot-national {output.plot_national:q} --plot-prefecture {output.plot_prefecture:q} --plot-prefecture-total {output.plot_prefecture_total:q} --plot-region {output.plot_region:q} 2>{log:q}
             """
 
     rule validate_prefecture_generation:

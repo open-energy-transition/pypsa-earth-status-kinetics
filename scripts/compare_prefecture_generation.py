@@ -139,6 +139,13 @@ def build_summary(comparison, region_comparison, categories):
     return summary.rename_axis("carrier").reset_index()
 
 
+def comparison_year_label(table):
+    """Return the model and reference years for figure titles."""
+    model_year = int(table["model_year"].iloc[0])
+    reference_year = int(table["reference_year"].iloc[0])
+    return f"PyPSA {model_year} vs METI {reference_year}"
+
+
 def plot_national(summary, path):
     """Bar plot of national totals per category."""
     x = np.arange(len(summary))
@@ -152,7 +159,7 @@ def plot_national(summary, path):
     ax.set_xticklabels(summary["carrier"])
     ax.set_xlabel("Carrier")
     ax.set_ylabel("Annual Generation (TWh)")
-    ax.set_title("Japan Electricity Generation: PyPSA vs METI")
+    ax.set_title(f"Japan Electricity Generation: {comparison_year_label(summary)}")
     ax.grid(True, axis="y", linestyle="--", alpha=0.4)
     ax.legend()
 
@@ -180,7 +187,7 @@ def plot_prefectures_by_carrier(comparison, categories, path):
                 ax.axvspan(i - 0.5, i + 0.5, color="grey", alpha=0.2)
 
         ax.set_title(carrier)
-        ax.set_ylabel("GWh")
+        ax.set_ylabel("Annual Generation (GWh)")
         ax.grid(True, linestyle="--", alpha=0.4)
         ax.legend(loc="upper right")
 
@@ -188,7 +195,11 @@ def plot_prefectures_by_carrier(comparison, categories, path):
     axes[-1].set_xticklabels(df["prefecture"], rotation=90)
     axes[-1].set_xlabel("Prefecture (grey = no bus in the model)")
 
-    fig.suptitle("Annual Generation by Prefecture and Carrier: PyPSA vs METI", y=1.0)
+    fig.suptitle(
+        "Annual Generation by Prefecture and Carrier: "
+        + comparison_year_label(comparison),
+        y=1.0,
+    )
     fig.tight_layout()
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -212,7 +223,8 @@ def plot_prefecture_totals(comparison, path):
     ax.set_xlabel("Prefecture")
     ax.set_ylabel("Annual Generation (GWh)")
     ax.set_title(
-        "PyPSA vs METI Annual Electricity Generation by Prefecture (all carriers)"
+        "Annual Electricity Generation by Prefecture (all carriers): "
+        + comparison_year_label(comparison)
     )
     ax.grid(True, linestyle="--", alpha=0.4)
     ax.legend()
@@ -239,13 +251,17 @@ def plot_regions_by_carrier(region_comparison, categories, region_order, path):
         ax.plot(df.index, df["reference_GWh"], marker="s", linewidth=2, label="METI")
 
         ax.set_title(carrier)
-        ax.set_ylabel("GWh")
+        ax.set_ylabel("Annual Generation (GWh)")
         ax.grid(True, linestyle="--", alpha=0.4)
         ax.legend(loc="upper right")
 
     axes[-1].set_xlabel("Region")
 
-    fig.suptitle("Annual Generation by Region and Carrier: PyPSA vs METI", y=1.0)
+    fig.suptitle(
+        "Annual Generation by Region and Carrier: "
+        + comparison_year_label(region_comparison),
+        y=1.0,
+    )
     fig.tight_layout()
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -266,6 +282,7 @@ def main():
     parser.add_argument("--output", required=True, help="Comparison per prefecture")
     parser.add_argument("--region-output", required=True, help="Comparison per region")
     parser.add_argument("--summary-output", required=True, help="Summary per category")
+    parser.add_argument("--model-year", type=int, required=True)
     parser.add_argument("--plot-national", required=True)
     parser.add_argument("--plot-prefecture", required=True)
     parser.add_argument("--plot-prefecture-total", required=True)
@@ -286,6 +303,22 @@ def main():
     comparison = compare_prefectures(model, reference, bus_map)
     region_comparison = compare_regions(comparison, regions)
     summary = build_summary(comparison, region_comparison, categories)
+
+    reference_years = reference["reference_year"].dropna().unique()
+    if len(reference_years) != 1:
+        raise ValueError("Expected exactly one METI reference year")
+
+    reference_year = int(reference_years[0])
+
+    for table in (comparison, region_comparison, summary):
+        table["model_year"] = args.model_year
+        table["reference_year"] = reference_year
+
+    logger.info(
+        "Comparing model year %d against METI reference year %d",
+        args.model_year,
+        reference_year,
+    )
 
     for path in [
         args.output,
