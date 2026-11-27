@@ -66,3 +66,15 @@ fuel_validation:
   shift_coal_to_elec: true  # must match sector.coal.shift_to_elec of the PyPSA-Earth run (upstream default: true)
   stale_observation_warning_years: 5  # warn when a UNSD commodity's latest observation is older than this, relative to the model year
   include_other_industries: true  # PyPSA-Earth keeps the unspecified ('other') industries in the model even with other_industries: false
+
+# Validation of annual electricity generation per prefecture against METI
+# Electric Power Survey Statistics. Japan only: included in validate_all and run
+# automatically when "JP" is in network_validation.countries, skipped otherwise.
+# The latest available METI reference year is selected automatically.
+# Standalone run:
+#   snakemake -j1 validate_prefecture_generation
+prefecture_generation_validation:
+  enable: true  # set to false to skip it for Japan networks
+  meti_generation: "data/japan/electricity_generation/METI_Generation_2023.xlsx"  # calendar-year workbook compiled from METI fiscal-year files, sheet "<year>_Annual"
+  prefecture_shapes: "data/japan/administrative_boundaries/japan_prefectures_2023.geojson"  # MLIT N03 2023, built with scripts/build_japan_prefecture_shapes.py
+  settings: "config/japan_prefecture_generation.yaml"  # carrier mapping, categories, regions

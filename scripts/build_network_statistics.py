@@ -130,6 +130,89 @@ def get_link_capacity(network, capacity_column):
     )
 
 
+def get_electricity_generators(network):
+    """Return generators on electricity buses, without artificial generators."""
+    electricity_buses = get_electricity_buses(network)
+
+    generator_carriers = (
+        network.generators["carrier"].fillna("").astype(str).str.strip().str.casefold()
+    )
+
+    return network.generators.index[
+        network.generators["bus"].isin(electricity_buses)
+        & ~generator_carriers.isin(NON_GENERATION_GENERATOR_CARRIERS)
+    ]
+
+
+def get_electricity_storage_units(network):
+    """Return storage units on electricity buses."""
+    return network.storage_units.index[
+        network.storage_units["bus"].isin(get_electricity_buses(network))
+    ]
+
+
+def get_electricity_generation_by_asset(network):
+    """
+    Return annual electricity generation per asset in MWh.
+
+    Generation is counted for generators on electricity buses (without
+    artificial generators such as load shedding), for the positive discharge
+    of storage units on electricity buses and for the electricity output
+    (``-p1``) of electricity-producing links, weighted by the snapshot
+    weightings. Carriers are returned as named in the network.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Columns ``asset``, ``component``, ``bus``, ``carrier`` and
+        ``generation`` (MWh).
+    """
+    weights = network.snapshot_weightings.generators.reindex(network.snapshots)
+
+    def annual(dispatch, assets):
+        return (
+            dispatch.reindex(index=network.snapshots, columns=assets, fill_value=0.0)
+            .clip(lower=0.0)
+            .mul(weights, axis=0)
+            .sum(axis=0)
+        )
+
+    generators = get_electricity_generators(network)
+    storage_units = get_electricity_storage_units(network)
+    production_links = get_electricity_production_links(network)
+
+    generation = pd.concat(
+        [
+            pd.DataFrame(
+                {
+                    "component": "Generator",
+                    "bus": network.generators.loc[generators, "bus"],
+                    "carrier": network.generators.loc[generators, "carrier"],
+                    "generation": annual(network.generators_t.p, generators),
+                }
+            ),
+            pd.DataFrame(
+                {
+                    "component": "StorageUnit",
+                    "bus": network.storage_units.loc[storage_units, "bus"],
+                    "carrier": network.storage_units.loc[storage_units, "carrier"],
+                    "generation": annual(network.storage_units_t.p, storage_units),
+                }
+            ),
+            pd.DataFrame(
+                {
+                    "component": "Link",
+                    "bus": network.links.loc[production_links, "bus1"],
+                    "carrier": network.links.loc[production_links, "carrier"],
+                    "generation": annual(-network.links_t.p1, production_links),
+                }
+            ),
+        ]
+    )
+
+    return generation.rename_axis("asset").reset_index()
+
+
 def process_network_statistics(inputs, outputs):
     """Extract and process electricity demand, capacity, and generation."""
     network = pypsa.Network(inputs["network_path"])
@@ -137,19 +220,10 @@ def process_network_statistics(inputs, outputs):
     # Extract electricity demand
     electricity_buses = get_electricity_buses(network)
 
-    generator_carriers = (
-        network.generators["carrier"].fillna("").astype(str).str.strip().str.casefold()
-    )
-
     # Exclude artificial generators from both capacity and generation statistics.
-    electricity_generators = network.generators.index[
-        network.generators["bus"].isin(electricity_buses)
-        & ~generator_carriers.isin(NON_GENERATION_GENERATOR_CARRIERS)
-    ]
+    electricity_generators = get_electricity_generators(network)
 
-    electricity_storage_units = network.storage_units.index[
-        network.storage_units["bus"].isin(electricity_buses)
-    ]
+    electricity_storage_units = get_electricity_storage_units(network)
 
     electricity_loads = network.loads.index[
         network.loads["bus"].isin(electricity_buses)
@@ -259,99 +333,8 @@ def process_network_statistics(inputs, outputs):
         outputs["optimal_capacity"],
     )
 
-    # Extract annual electricity generation from generators
-    generator_generation = (
-        network.generators_t.p.reindex(
-            index=network.snapshots,
-            columns=electricity_generators,
-            fill_value=0.0,
-        )
-        .clip(lower=0.0)
-        .mul(
-            network.snapshot_weightings.generators.reindex(network.snapshots),
-            axis=0,
-        )
-        .sum(axis=0)
-        .rename("generation")
-        .to_frame()
-    )
-
-    generator_generation["carrier"] = network.generators.loc[
-        generator_generation.index,
-        "carrier",
-    ].to_numpy()
-
-    generator_generation["bus"] = network.generators.loc[
-        generator_generation.index,
-        "bus",
-    ].to_numpy()
-
-    # Extract annual positive discharge from storage units
-    storage_generation = (
-        network.storage_units_t.p.reindex(
-            index=network.snapshots,
-            columns=electricity_storage_units,
-            fill_value=0.0,
-        )
-        .clip(lower=0.0)
-        .mul(
-            network.snapshot_weightings.generators.reindex(network.snapshots),
-            axis=0,
-        )
-        .sum(axis=0)
-        .rename("generation")
-        .to_frame()
-    )
-
-    storage_generation["carrier"] = network.storage_units.loc[
-        storage_generation.index,
-        "carrier",
-    ].to_numpy()
-
-    storage_generation["bus"] = network.storage_units.loc[
-        storage_generation.index,
-        "bus",
-    ].to_numpy()
-
-    # Extract annual electricity generation from production links
-    production_links = get_electricity_production_links(network)
-
-    link_generation = (
-        (
-            -network.links_t.p1.reindex(
-                index=network.snapshots,
-                columns=production_links,
-                fill_value=0.0,
-            )
-        )
-        .clip(lower=0.0)
-        .mul(
-            network.snapshot_weightings.generators.reindex(network.snapshots),
-            axis=0,
-        )
-        .sum(axis=0)
-        .rename("generation")
-        .to_frame()
-    )
-
-    link_generation["carrier"] = network.links.loc[
-        link_generation.index,
-        "carrier",
-    ].to_numpy()
-
-    link_generation["bus"] = network.links.loc[
-        link_generation.index,
-        "bus1",
-    ].to_numpy()
-
-    generation = pd.concat(
-        [
-            generator_generation,
-            storage_generation,
-            link_generation,
-        ],
-        ignore_index=True,
-    )
+    # Extract annual electricity generation per asset
+    generation = get_electricity_generation_by_asset(network)
 
     # Convert weighted MWh to GWh
     generation["generation"] /= 1e3

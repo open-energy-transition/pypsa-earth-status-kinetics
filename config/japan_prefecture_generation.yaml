@@ -1,0 +1,59 @@
+# SPDX-FileCopyrightText: PyPSA-Earth and PyPSA-Eur Authors
+# SPDX-License-Identifier: CC0-1.0
+
+# Settings for the Japan prefecture generation validation (PyPSA vs METI).
+# Used by:
+#   scripts/build_reference_generation_meti_prefecture.py
+#   scripts/build_network_prefecture_generation.py
+#   scripts/compare_prefecture_generation.py
+
+# Categories compared (METI categories), in plotting order
+categories: [thermal, nuclear, hydro, solar, wind, geothermal, biomass, waste]
+
+# Carrier names are first harmonized with harmonize_electricity_carrier_names()
+# from scripts/build_network_statistics.py (the same names as in the national
+# electricity validation), then mapped to the METI categories below.
+
+# Harmonized carriers that are not counted as electricity generation
+not_generation:
+- h2 fuel cell  # electricity from stored hydrogen, like a battery
+
+# Harmonized carrier -> METI category
+carrier_mapping:
+  coal: thermal  # coal, lignite, coal CHP
+  gas: thermal  # CCGT, OCGT, gas CHP
+  oil: thermal  # oil, oil CHP
+  nuclear: nuclear
+  hydro: hydro  # hydro, ror, PHS (METI hydro includes pumped storage)
+  onwind: wind
+  offwind: wind  # offwind-ac, offwind-dc
+  offwind-float: wind
+  pv: solar  # solar, rooftop PV, csp
+  solar-hsat: solar
+  geothermal: geothermal
+  biomass: biomass  # biomass EOP, solid biomass CHP
+  waste: waste  # not yet represented in the solved networks
+
+# METI Excel (sheet "<year>_Annual") column -> category
+# METI "thermal power plant" includes biomass and waste; they are subtracted
+# from thermal and compared as their own categories.
+meti_columns:
+  hydroelectric power plant: hydro
+  thermal power plant: thermal
+  nuclear power plant: nuclear
+  wind power: wind
+  sunlight: solar
+  geothermal: geothermal
+  biomass: biomass
+  Waste: waste
+
+# Prefecture -> region (8 standard regions of Japan)
+regions:
+  Hokkaido: [Hokkaido]
+  Tohoku: [Aomori, Iwate, Miyagi, Akita, Yamagata, Fukushima]
+  Kanto: [Ibaraki, Tochigi, Gunma, Saitama, Chiba, Tokyo, Kanagawa]
+  Chubu: [Niigata, Toyama, Ishikawa, Fukui, Yamanashi, Nagano, Gifu, Shizuoka, Aichi]
+  Kansai: [Mie, Shiga, Kyoto, Osaka, Hyogo, Nara, Wakayama]
+  Chugoku: [Tottori, Shimane, Okayama, Hiroshima, Yamaguchi]
+  Shikoku: [Tokushima, Kagawa, Ehime, Kochi]
+  Kyushu: [Fukuoka, Saga, Nagasaki, Kumamoto, Oita, Miyazaki, Kagoshima, Okinawa]
